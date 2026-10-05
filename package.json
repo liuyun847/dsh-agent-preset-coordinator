@@ -1,0 +1,33 @@
+{
+  "name": "dsh-agent-preset-coordinator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DSH 组合包：项目协调者预设（preset-coordinator 声明行 + 随包技能 + 防膨胀工具）",
+  "dsh": {
+    "bundle": {
+      "patch": "./presets/coordinator.patch.yml"
+    }
+  },
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "presets",
+    "skills",
+    "tools",
+    "README.md"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/liuyun847/dsh-agent-preset-coordinator.git"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "cordis",
+    "agent-preset",
+    "coordinator"
+  ]
+}
