@@ -1,11 +1,11 @@
-<#
+﻿<#
 .SYNOPSIS
     重算本预设与上游 shipped `standard` 的差异，供 presets/coordinator.patch.yml 头部的"当前基线"声明复核。
 
 .DESCRIPTION
     两份 patch 文件各提取 `config.plugins` 的正文（剥离声明行包装与公共缩进），
     剔除注释行与空行后按多重集比对，输出新增/删除行数与两侧本体行数。
-    同时列出全部候选 standard patch 的路径、行数与 SHA256 —— 本机可能有多份 dsh 安装，
+    同时列出全部候选 standard patch 的路径、行数与 SHA256 —— 一台机器上可能有多份 dsh 安装，
     拿旧副本对比会得出错误结论（例如把 present 行误判成本预设新增的差异）。
     因此脚本默认只用第一个存在的候选路径，并把全部候选都列出来供人工确认；
     **候选有几份、实际存在几份由输出当场呈现（Test-Path 逐个判定），文档里不写死份数**。

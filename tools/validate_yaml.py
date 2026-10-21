@@ -12,7 +12,7 @@
    所以悬空引用、无人引用的死锚点、以及行号引用的回归都必须响亮失败。
 
 用法:  uv run --with pyyaml tools/validate_yaml.py [路径...]
-       省略路径时校验 presets/coordinator.patch.yml，并附加锚点交叉校验。
+       省略路径时校验 presets/ 下的两份组合文件，并附加锚点交叉校验。
 
 退出码: 0 = 全部通过；1 = 至少一项检查失败；2 = 缺少 PyYAML。
 """
@@ -196,13 +196,16 @@ def check_anchors(root: Path) -> bool:
     引用写错名字、锚点块被删、或有人图省事又把行号写回去，都必须**响亮失败**。
     只做名字级校验；锚点块的具体位置由真实挂载校验兜底。
     """
-    composition = root / "presets" / "coordinator.patch.yml"
-    if not composition.exists():
-        print(f"FAIL  锚点校验：找不到 {composition}")
+    compositions = [root / "presets" / name for name in ("coordinator.patch.yml", "executor.patch.yml")]
+    missing = [path for path in compositions if not path.exists()]
+    if missing:
+        print(f"FAIL  锚点校验：找不到 {', '.join(str(path) for path in missing)}")
         return False
 
     anchor_re = re.compile(r"\[anchor:\s*([a-z0-9-]+)\s*\]")
-    defined = set(anchor_re.findall(composition.read_text(encoding="utf-8")))
+    defined = set()
+    for composition in compositions:
+        defined |= set(anchor_re.findall(composition.read_text(encoding="utf-8")))
     if not defined:
         print("FAIL  锚点校验：组合文件里没有任何 [anchor:...] 定义（引用会指向空气）")
         return False
@@ -216,7 +219,7 @@ def check_anchors(root: Path) -> bool:
     #
     # 为什么不能只判"附近性"（本判据上一版的做法）：标点写法确实很多，但**只要求"文件名与
     # 其后 20 字符内的数字同时出现"必然过宽** —— 本仓库的文档里满是**体积/行数统计**
-    # （历史文档里那张体积表：`…\agent.cordis.yml` | 389 / 24181 → 373 / 23030）、
+    # （文档里的体积/行数统计表：`…\agent.cordis.yml` | 389 / 24181 → 373 / 23030）、
     # 时间戳备份文件名（`agent.cordis.yml.bak-20260911`）、以及"两文件行数均不变（…= 373）"
     # 这类计数句。它们与行号引用共享同一批文件名和数字，于是本文档自己的统计表全被打成 FAIL：
     # 一个**永远红的检查等于没有检查**（迟早被人绕过、注释掉或删掉，那才是真的失去防护）。
@@ -280,7 +283,7 @@ def main(argv: list[str]) -> int:
     if argv:
         targets = [Path(a) for a in argv]
     else:
-        targets = [root / "presets" / "coordinator.patch.yml"]
+        targets = [root / "presets" / name for name in ("executor.patch.yml", "coordinator.patch.yml")]
     ok = True
     for target in targets:
         if not target.exists():

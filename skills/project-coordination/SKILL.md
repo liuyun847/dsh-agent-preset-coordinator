@@ -11,7 +11,7 @@ description: 只给协调者用——如果你是被另一个 Agent 派来干具
 
 逐行保留/移除的决策依据**不在这份手册里**：历史决策表见同目录 `DECISIONS.md`，与上游的对照和差异清单见同目录 `BASELINE.md`。本节只留一条**必须先看**的耦合约束：
 
-**删 `modelSelectionSettings` 与加 `toolFilter.deny` 必须同生同死。** 唯一权威副本在 `presets/coordinator.patch.yml` 的锚点 `[anchor: model-selection-coupling]`（`tool-subagent` 行上方），**那里是全文唯一出处，本节不复述**；外部引用一律按锚点名指认，**不要写行号**（会随注释增删静默漂移且无人报错），定位就直接 `grep -n "model-selection-coupling" presets/coordinator.patch.yml`。
+**子代理的人格与工具面由独立预设 `executor` 承担（0.2.1 起委派行不再有 `persona` / `toolFilter`）。** 由两份文件分工：**引用关系**写在 `presets/coordinator.patch.yml` 的锚点 `[anchor: subagent-preset]`（`tool-subagent` 行上方），**预设本体**在同包 `presets/executor.patch.yml`（2026-10-22 起随包，此前临时挂在 profile 的 `cordis.patch.yml`）。**两处都是全文唯一出处，本节不复述**；外部引用一律按锚点名指认，**不要写行号**（会随注释增删静默漂移且无人报错），定位就直接 `grep -rn "subagent-preset" presets/`。
 
 ## 二、共享上下文 = 任务板工具
 
@@ -72,7 +72,7 @@ description: 只给协调者用——如果你是被另一个 Agent 派来干具
 
 - **R1 · 一事实一主副本**：每条知识只允许"**权威副本恰好一处**（带锚点）+ 其余全是指针"；指针不写行号（会漂移），写锚点名或文件名；发现两处完整表述就**当场删掉非权威那份**。
 - **R2 · 准入即置换**：新增必须先声明替换/合并了哪条，**净行数 ≤ 0**；手册只描述**现在是什么**——"精简记录 / 变更日志 / 某日删了什么"不写进来，改动理由交给 git 提交信息；行数与字节数以 `tools/preset_check.ps1` 的输出为准，本手册不复述（数字会漂移）。
-- **R3 · 双门检查**：改完跑 `pwsh tools/preset_check.ps1`（预算门：行数/字节数硬顶 + 重复段检测）。预算门超限即 fail，须先删等量内容再提交；它只压**每轮注入**的文件（`presets/coordinator.patch.yml`），按需加载的 `SKILL.md` 不计预算门、重复门仍生效。脚本只能查"厚不厚、重不重"，**查不出"该不该还在板上"**——那只能靠 R0。
+- **R3 · 双门检查**：改完跑 `pwsh tools/preset_check.ps1`（预算门：行数/字节数硬顶 + 重复段检测）。预算门超限即 fail，须先删等量内容再提交；它只压**每轮注入**的文件（`presets/coordinator.patch.yml` 420/32000、`presets/executor.patch.yml` 130/7500），按需加载的 `SKILL.md` 不计预算门、重复门仍生效。脚本只能查"厚不厚、重不重"，**查不出"该不该还在板上"**——那只能靠 R0。
 
 ## 三、委派 prompt 模板
 
@@ -153,7 +153,7 @@ description: 只给协调者用——如果你是被另一个 Agent 派来干具
 - **纪律**：同一时刻**最多只派一个子代理**碰上述资源；多步操作放进**同一次委派**里顺序做完，前一个**完全结算**后再派下一个——这是铁律一「并发扇出」的**明确例外**，冲突时本条约优先。Godot"一个 runner 一个会话槽位"是**必要**设计，只加调度纪律、不要为并行放宽；也**别指望它报错拒绝保护你**。冲突**不会**以报错呈现——表现为操作打偏、界面状态莫名跳变或游戏进程消失，子代理无法归因、你也看不到，只能由你守纪律（本会话之外的其他会话同样管不到）。
 - **派 CUA 前在委派 prompt 里点名技能**：电脑控制的完整纪律（观察→动作→验证、坐标、不可重放；**没有急停开关**，判断力就是安全边界）在按需加载的技能 `computer-control` 里。子代理能看到技能目录但**不一定会主动加载**，委派时写明「先加载技能 `computer-control` 再动手」，否则它会凭目录名盲操作（多截图、多报错重试）。
 - **别指望队列/锁兜住**：一次桌面或 Godot 操作是一长串调用、中间夹着几十秒推理，冲突窗口是**整个序列**（分钟级）；调用级互斥只覆盖单次 `tools/execute`（毫秒级），推理时闸门空闲、别人照样插得进来——**队列只保证两次调用不重叠，不保证两个序列不交错**。唯一可靠的办法就是上一条的串行派活。
-- **子代理默认继承父代理的 provider/model/推理档位，本预设下无法按任务换模型**：`subagent` 不暴露 `provider`/`model`/`reasoning_effort`，也没有 `list_subagent_models`（Web 的 `subagent-model-selection` 开关因此是**死开关**）。这是"用结构隔离换掉模型选择"的**有意取舍，不可兼得**；机理与恢复路径见锚点 `[anchor: model-selection-coupling]`，逐条决策见同目录 `DECISIONS.md`。
+- **子代理默认继承父代理的 provider/model/推理档位，本预设下无法按任务换模型**：`subagent` 不暴露 `provider`/`model`/`reasoning_effort`，也没有 `list_subagent_models`（Web 的 `subagent-model-selection` 开关因此是**死开关**）。0.2.1 起"换人格 + 收窄工具面"改由独立预设 `executor` 承担，模型选择这道取舍没变；机理见锚点 `[anchor: subagent-preset]`，逐条决策见同目录 `DECISIONS.md`。
 - 委派深度默认上限 3 层（协调者 → 子代理 → 孙代理 → 曾孙代理）。
 
 ## 七、验收怎么做

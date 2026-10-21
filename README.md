@@ -18,7 +18,8 @@ DSH「项目协调者」预设的 **bundle 组合包**：只委派、永不阻�
 
 | 路径 | 作用 | 何时读 |
 |---|---|---|
-| `presets/coordinator.patch.yml` | **组合本体**：一行 `@deepseek-ai/dsh-agent-preset` 声明（`config.plugins` = 工具面、人格、隔离域） | 改插件行时 |
+| `presets/coordinator.patch.yml` | **协调者预设本体**：一行 `@deepseek-ai/dsh-agent-preset` 声明（`config.plugins` = 工具面、人格、隔离域） | 改插件行时 |
+| `presets/executor.patch.yml` | **执行子代理预设**：协调者的 subagent 行按 `agentPreset: executor` 解析到这里（人格 + 减去全部委派行的工具面）。与上一份由 `package.json` 的 `dsh.bundle.patch` 数组一起装载，**缺一即整份协调者预设激活失败** | 改子代理人格 / 工具面时 |
 | `skills/project-coordination/SKILL.md` | **操作手册**：三种模式、委派模板、共享上下文（任务板工具 `task_board`）用法、R0 移出机制、并发边界、面向用户的呈现 | 模型按需加载 |
 | `skills/project-coordination/BASELINE.md` | 与上游 `standard` 的差异对照（历史档案） | 改 yml 时人工查 |
 | `skills/project-coordination/DECISIONS.md` | 逐行保留/移除决策（历史档案） | 改 yml 时人工查 |
@@ -42,7 +43,7 @@ dshpm add file:./plugins/dsh-agent-preset-coordinator --profile desktop
 配套的任务板插件用同样方式装（见上一节）。
 
 - **bundles 校正**：本包声明了 `dsh.bundle.patch`，`dshpm sync` 会把它收进 `dsh.profile.bundles`（判据：能解析 + 有 patch）。
-- **生效**：组合本体（`presets/coordinator.patch.yml`）在**宿主进程启动时**一次性读入，**不重启宿主不生效**（连新建会话也拿不到）；重启后只对**新建**会话生效。完整口径见「改动何时生效」一节。
+- **生效**：组合本体（`presets/` 下两份 patch，由 `package.json` 的 `dsh.bundle.patch` 数组装载）在**宿主进程启动时**一次性读入，**不重启宿主不生效**（连新建会话也拿不到）；重启后只对**新建**会话生效。完整口径见「改动何时生效」一节。
 - **skills 挂载的是 node_modules 副本**（`createRequire(baseUrl)` 解析包目录，不是 `plugins\` 下的源码目录）；技能正文的改动对已在运行的会话也生效。
 
 ### 改包内文件前先看（本地 `file:` 安装的两个坑）
@@ -83,8 +84,9 @@ DSH 的原生机制已经覆盖了 Cursor Projects 的大部分能力，不需�
 ## 必须知道的约束
 
 - **`tools/preset_check.ps1` 必须保持 UTF-8 with BOM**。无 BOM 时 Windows PowerShell 5.1 会把中文按 ANSI 解码，抛语法错误并 Exit 1（已实测）。**编辑工具会抹掉 BOM**——保存后须用 `[System.IO.File]::WriteAllText($p, $text, [System.Text.UTF8Encoding]::new($true))` 复原，并自验前 3 字节是 `EF BB BF`。
-- **上限只保留给"每轮注入"的文件**：硬顶 420 行 / 32000 字节只压在 `presets/coordinator.patch.yml` 这一份上。按需加载的长文档（`SKILL.md`）**不设上限**，由"完成即移出"（R0）与重复门治理——不要事后给它补上限。任务板 `task_board` 的落盘副本由宿主领域存储承担（`~\.dsh\storages\task_board.json`），它不是文档、不进这两道门；只有工具自带的**单字段输入硬顶**（描述 8,192 B / 标题 200 B / 依赖 16 条 / 写范围 8 条，超限**拒绝写入**）——**板内条数与板子数量没有上限**（增长型上限已整体取消，2026-09-25）。
-- **改动何时生效**（2026-09-24 迁移后口径）：① **工具面 / 提示词段落 / 插件行**由 `presets/coordinator.patch.yml` 决定，世代戳只认它。该文件在**宿主进程启动时**由 `dsh-app-boot` 用 `readFileSync` 一次性读入，这条路径**没有任何文件监听**；组合唯一的「热重载」通道 `dsh-hmr` 只监听三处——profile 的 `cordis.patch.yml`、`~\.dsh\cordis.patch.yml`、profile 的 `package.json`——重读判据 =「`dsh.profile.bundles`（从 package.json 取）+ 两份 patch 文件全文」：两份 patch 任一内容变化即重读整棵树，`package.json` **只有 `bundles` 真的变了才算**（其余键改了会提前 return、不重读；依据 `dsh-hmr/lib/index.js` 353-376 行）。⚠ 该判据有个陷阱：hmr 记的「上次 bundles」是**实际装载成功**的层名单，而每次比对读的是 manifest 的原始数组，有 bundle 被跳过或顺序变化时两者不等 ⇒ 此时改 `package.json` 的任意键都会越过"只有 bundles 变了才算"的提前返回、意外重读整棵树。本包的 yml 既不在监听集也不在判据里 ⇒ **不重启宿主 dsh，连新建会话也拿不到新文本**；重启后只有**新建**会话用新提示词，已在跑的会话保持自己那一代继续跑。（附带效果：此后若改了 profile 的 `cordis.patch.yml` 或 `~\.dsh\cordis.patch.yml`，`dsh-hmr` 会整份重读组合，本包的新文本会顺带生效；改 `package.json` 则只有动 `bundles` 才有同样效果——都不是改本文件的可靠路径。）② **技能文件内容**（`skills/` 下的 `SKILL.md` 等）**不在世代键里**，走 `dsh-skill-filesystem` 的目录监视：改 frontmatter / 增删技能在下一个模型步骤就刷新技能目录，改正文则下次加载即读到新内容——都对**已在运行的会话**生效，无需新建会话或重启进程（前提：改动确实落在运行副本里；本包同 inode，原地改即两侧同时变）。
+- **上限只保留给"每轮注入"的文件**：硬顶 420 / 32000 压在 `presets/coordinator.patch.yml`（每轮每会话）、130 / 7500 压在 `presets/executor.patch.yml`（只在 executor 会话）；两份**不要合成一份**，合起来必撞上面那条硬顶。按需加载的长文档（`SKILL.md`）**不设上限**，由"完成即移出"（R0）与重复门治理——不要事后给它补上限。任务板 `task_board` 的落盘副本由宿主领域存储承担（`~\.dsh\storages\task_board.json`），它不是文档、不进这两道门；只有工具自带的**单字段输入硬顶**（描述 8,192 B / 标题 200 B / 依赖 16 条 / 写范围 8 条，超限**拒绝写入**）——**板内条数与板子数量没有上限**（增长型上限已整体取消，2026-09-25）。
+- **改动何时生效**（2026-09-24 迁移后口径）：① **工具面 / 提示词段落 / 插件行**由 `presets/coordinator.patch.yml` 与 `presets/executor.patch.yml` 共同决定，世代戳只认这两份。该文件在**宿主进程启动时**由 `dsh-app-boot` 用 `readFileSync` 一次性读入，这条路径**没有任何文件监听**；组合唯一的「热重载」通道 `dsh-hmr` 只监听三处——profile 的 `cordis.patch.yml`、`~\.dsh\cordis.patch.yml`、profile 的 `package.json`——重读判据 =「`dsh.profile.bundles`（从 package.json 取）+ 两份 patch 文件全文」：两份 patch 任一内容变化即重读整棵树，`package.json` **只有 `bundles` 真的变了才算**（其余键改了会提前 return、不重读；依据 `dsh-hmr/lib/index.js` 353-376 行）。⚠ 该判据有个陷阱：hmr 记的「上次 bundles」是**实际装载成功**的层名单，而每次比对读的是 manifest 的原始数组，有 bundle 被跳过或顺序变化时两者不等 ⇒ 此时改 `package.json` 的任意键都会越过"只有 bundles 变了才算"的提前返回、意外重读整棵树。本包的 yml 既不在监听集也不在判据里 ⇒ **不重启宿主 dsh，连新建会话也拿不到新文本**；重启后只有**新建**会话用新提示词，已在跑的会话保持自己那一代继续跑。（附带效果：此后若改了 profile 的 `cordis.patch.yml` 或 `~\.dsh\cordis.patch.yml`，`dsh-hmr` 会整份重读组合，本包的新文本会顺带生效；改 `package.json` 则只有动 `bundles` 才有同样效果——都不是改本文件的可靠路径。）② **技能文件内容**（`skills/` 下的 `SKILL.md` 等）**不在世代键里**，走 `dsh-skill-filesystem` 的目录监视：改 frontmatter / 增删技能在下一个模型步骤就刷新技能目录，改正文则下次加载即读到新内容——都对**已在运行的会话**生效，无需新建会话或重启进程（前提：改动确实落在运行副本里；本包同 inode，原地改即两侧同时变）。
+- **公开版与作者本机的唯一差异**：作者本机的预设里另挂了一行 `ptc-lazy-sdk`（按需注入工具签名的插件，尚未单独发布），公开版不含该行；其余插件行与本机一致，去掉它只是签名段改为全量注入，不改变工作方式。
 - **旧目录形态已废弃**：`~\.dsh\.agent-presets\` 下的 `coordinator\` 等目录 rc.1 起不再被读取；本包就是权威副本。`team-coordinator` / `teamlab` 两份目录暂未迁移（Team 方向已终止，去留未定）。
 
 ## 防膨胀设计

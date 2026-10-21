@@ -10,19 +10,20 @@
 # ── 改动本文件时先看这三条（本文件是它们的唯一副本）─────────────────────────
 #   1. shell / fs 行必须保留 —— 协调者与子代理共享同一套工具注册，禁掉等于子代理
 #      再也跑不了构建 / 测试。"协调者只委派不执行"由 persona 纪律保证，不由工具面。
-#   2. 两条委派工具行的 persona 与 toolFilter.deny 必须与「modelSelectionSettings 的
-#      缺席」同生同死 —— 见下方 [anchor: model-selection-coupling] 块。
+#   2. 子代理的人格与工具面由**独立预设** executor 承担（0.2.1 起 persona/toolFilter 已删）——
+#      spawn 行用 agentPreset: executor 指过去；该预设与本文件同包（presets/executor.patch.yml），
+#      改它等于改所有子代理，见下方 [anchor: subagent-preset]。
 #   3. 改完本文件跑一次 tools/preset_check.ps1（预算是硬顶：超了必须先删等量内容再提交）。
 #
-# 换言之：子代理继承的是父代理的人格与工具面，只有这两样可隔离 —— 人格用委派行的
-# persona 字段遮蔽，委派工具用 toolFilter.deny 结构摘除；其余工具面无法按角色切分。
+# 换言之：子代理默认继承父代理的整份预设（含人格与委派工具）；要换人格、收窄工具面，
+# 只能改用另一个 Agent 预设 —— 即同包 presets/executor.patch.yml 里那份 executor。
 #
 # 生效与同步（迁移自旧目录预设，依据 rc.1 上游实现）：
 #   · **不重启宿主不生效**（连新建会话也拿不到新文本）；完整口径见 README「改动何时生效」一节。
 #   · 声明在宿主启动时由 agent-preset-registry 提前装载，改动只影响**之后创建**的 Agent（已有会话保持自己那一代）。
 #   · 权威副本 = profile 的 plugins/dsh-agent-preset-coordinator/；宿主实际加载的是
 #     node_modules 那份 —— 本包两侧实测**同一 inode 的硬链接**（原地改已有文件两侧同生效；
-#     新增文件不进运行副本）。本机两种形态都有，判据逐文件实测 + 收尾核两侧 SHA256，详见 README。
+#     新增文件不进运行副本）。两种形态都可能出现，判据逐文件实测 + 收尾核两侧 SHA256，详见 README。
 #   · skills/ 由 skill-filesystem 挂载（createRequire 解析到 node_modules 副本内的包
 #     目录）；该目录同 inode，原地改即两侧生效，断链再重建。
 #
@@ -61,7 +62,6 @@
           - id: persona
             name: '@deepseek-ai/dsh-persona'
             config:
-              suffix: Your working directory is {{cwd}}.
               prefix: |-
                 你是「项目协调者」：运行在 {{model}} 上的委派型 Agent。你把需求拆成计划，派子代理执行，验收它们的产出，再向用户汇报。
 
@@ -109,6 +109,10 @@
             config:
               maxBytes: 65536
 
+          # 每轮注入"现在是什么时间"（0.2.1 起 standard / cordis 预设都带这一行）。
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+
           # ── shell ───────────────────────────────────────────────────────────────────
 
           # 注意：这两行必须保留。子代理与协调者共享工具面（委派工具除外，见 delegation 组），
@@ -153,6 +157,10 @@
           # chooses is whether its agent can collect and stop background work at all.
           - id: tool-jobs
             name: '@deepseek-ai/dsh-tool-jobs'
+
+          # 提醒工具（0.2.1 从 dsh-schedule 拆成独立工具包）。子代理预设里不放这一行。
+          - id: tool-schedule
+            name: '@deepseek-ai/dsh-tool-schedule'
 
           # ── skills ──────────────────────────────────────────────────────────────────
 
@@ -274,83 +282,34 @@
               - id: tool-subagent-list-agents
                 name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
 
-              # 委派主通道。continuable 让调用立即返回子代理 id 而不等待结果 ——
-              # 这正是"协调者永不被卡住"的机制来源。
+              # 委派主通道。0.2.1 起调用立即返回子代理 id（旧 backgroundMode 已删，
+              # 后台语义成为唯一形态）—— 这正是"协调者永不被卡住"的机制来源。
               #
-              # persona 是结构性修复，别删：子代理会继承父代理的插件对象与 prompt 段，
-              # 若不给子代理换人格，它会连"你是项目协调者、不要亲自改代码"一起继承，
-              # 最坏结果是静默空转——把任务再转包一层然后回复"已派活"。
-              # 该字段在子代理的 creation window 里装一段 scope 内遮蔽人格，
-              # 把冲突从"靠模型自我分类"变成"根本不注入"。spawn 与 fork 均声明 persona（字符串人格文本，不是布尔开关）。
-              # 人格段本身不含自分类兜底行；唯一的自分类守卫在 skills/project-coordination/SKILL.md 的 frontmatter 描述里（技能目录对子代理可见，人格遮蔽管不到它）。
-              #
-              # ## [anchor: model-selection-coupling] 严格耦合，勿单改一边
-              # 删除 modelSelectionSettings 与加 toolFilter.deny 必须同生同死。若日后为了开启
-              # 「子代理按任务选模型」而把 modelSelectionSettings 加回某一行，该行工具会回到
-              # own 层，而 restrict() 够不到 own 层 → 子代理创建时抛
-              # "tools.restrict() names unknown global tool" → 每次委派失败。
-              # 真要恢复模型选择，得改用 maxDepth: 1 之类的替代方案，不能只把 flag 加回来。
+              # ## [anchor: subagent-preset] 子代理的人格与工具面
+              # 0.2.1 删掉了 persona / toolFilter：子代理默认继承父代理的整份预设，
+              # 于是它会连"你是项目协调者、不要亲自改代码"一起继承，最坏结果是把任务
+              # 再转包一层然后回复"已派活"。替代做法是独立预设：agentPreset: executor
+              # 指到同包 presets/executor.patch.yml（该人格 + 工具面减去全部委派行）。
+              # ⚠ 同包两份 yml 由 package.json 的 dsh.bundle.patch 数组一起装载：删掉或挪走
+              #   executor.patch.yml，这里会在挂载期抛 Unknown agent preset: executor，
+              #   **整份预设激活失败**（不是退回继承）。
               # 外部引用一律按本锚点名，不要写行号。
               - id: tool-subagent
                 name: '@deepseek-ai/dsh-tool-subagent'
                 config:
                   provider: spawn
                   toolName: subagent
-                  backgroundMode: continuable
-                  toolFilter:
-                    deny:
-                      - subagent
-                      - subagent_fork
-                  persona: |-
-                    你是「执行子代理」：被上级 Agent 派来干具体活的一次性执行者。
-                    直接动手完成任务——该写代码就写代码、该跑命令就跑命令。
-                    不要转包：你的工具面里没有委派工具；需要协作或需要拆分时，把情况和建议写进最终回复交给上级。
-                    不要等待新指令，不要询问上级，按任务里给出的验收标准自行判断完成。
-                    收尾时在最终回复里给出：结论、改动清单、遗留问题（上级会收到这段内容）。
+                  agentPreset: executor
 
-              # Fork omits model selection so provider/model stay equal to the parent and
-              # the inherited history remains eligible for KV Cache reuse. This preset
-              # keeps fork continuable; parent and child inherit the same messaging tool,
-              # while the parent id and return guidance follow the inherited history.
+              # fork 后端 inheritsParentContext ⇒ 0.2.1 无法给它换人格（agentPreset 只对 spawn 生效）。
+              # 保留它换来的代价是：fork 子代理继承协调者人格与委派工具；用 maxDepth: 1 收紧递归。
+              # 若不接受这个代价，删掉本行即可（fork 委派能力随之消失）。
               - id: tool-subagent-fork
                 name: '@deepseek-ai/dsh-tool-subagent'
                 config:
                   provider: fork
                   toolName: subagent_fork
-                  backgroundMode: continuable
-                  toolFilter:
-                    deny:
-                      - subagent
-                      - subagent_fork
-                  persona: |-
-                    你是「执行子代理」：被上级 Agent 派来接着已有对话继续干活的一次性执行者。
-                    你已继承此前轮次的上下文，直接在其上推进，不要把已完成的事重做一遍。
-                    直接动手完成任务——该写代码就写代码、该跑命令就跑命令。
-                    不要转包：你的工具面里没有委派工具；需要协作或需要拆分时，把情况和建议写进最终回复交给上级。
-                    不要等待新指令，按任务里给出的验收标准自行判断完成。
-                    收尾时在最终回复里给出：结论、改动清单、遗留问题（上级会收到这段内容）。
-
-              # Production dsh does not install these optional providers. Install the
-              # matching Bundle in this Profile and restart the Host, then remove
-              # `disabled` from the matching tool row. Host availability alone grants
-              # no tool.
-              - id: tool-subagent-codex
-                name: '@deepseek-ai/dsh-tool-subagent'
-                disabled: true
-                config:
-                  provider: codex
-                  toolName: subagent_codex
-                  backgroundMode: one-shot
-                  maxDepth: provider-managed
-
-              - id: tool-subagent-claude-code
-                name: '@deepseek-ai/dsh-tool-subagent'
-                disabled: true
-                config:
-                  provider: claude-code
-                  toolName: subagent_claude_code
-                  backgroundMode: one-shot
-                  maxDepth: provider-managed
+                  maxDepth: 1
 
               # 大批量扇出原用 workflow（workflow-ptc + tool-workflow）。
               # 已移除：workflow 是前台阻塞调用（"the parent turn blocks until the whole
@@ -399,6 +358,10 @@
 
           - id: present
             name: '@deepseek-ai/dsh-tool-present'
+          - id: tool-presentation
+            name: '@deepseek-ai/dsh-agent-tool-presentation'
+            config:
+              mode: ptc
 
 # ── 部署默认预设:coordinator(覆盖 web-app bundle 的 standard)──────────────────
 # 本行按 id 覆盖 agent-preset-registry 行的 config(整行替换;该行只有 default 一个键,

@@ -3,7 +3,7 @@
     预设与项目文档的防膨胀双门检查（R3）：预算门 + 重复门。
 
 .DESCRIPTION
-    规格：组合包当前的防膨胀双门口径；预算表与比对源集合都硬编码在本脚本里（改预算=改本文件）。
+    规格见 README「防膨胀设计」一节。
     两个门：
 
       1. 预算门（硬门，超限 exit 1）
@@ -17,7 +17,7 @@
          '#' 及其后空白 → 以 LF 重连）后取 MD5，同一哈希在同一文件**或跨文件**出现 ≥ 2 次即报。
          只用**精确哈希**，不做语义相似度——宁可漏报不可误报。
 
-    比对范围：预算门覆盖的 3 份文件，加上不计预算门的按需加载长文档（SKILL.md）。
+    比对范围：预算门覆盖的 4 份文件，加上不计预算门的长文档 SKILL.md。
 
 .NOTES
     只读脚本：绝不写入/修改/删除任何文件，只调用 Get-Content / ReadAllBytes 级别的读操作。
@@ -28,7 +28,7 @@
     故比对源不再包含任何**包外**文件——`-Workspace` 参数随之删除：它唯一的用途就是定位那个文件，
     包外比对需求消失即不留空参数（将来若真要查包外文件，再按需加参，而不是写死一个默认路径）。
 
-    预算口径中**来自明确决议**的例外（**不是漏写，勿事后补上**）：
+    预算口径中**来自用户决议**的例外（**不是漏写，勿事后补上**，依据见 README「防膨胀设计」）：
       · 上限只保留给**「每轮注入」**的文件（天花板来自注入成本，与「文档该多长」无关）——
         不得因为下面的 skip 就顺手把它的上限也取消。
       · 按需加载的长文档**不设上限**（硬顶只会逼人删内容），靠 R0「完成即移出」与重复门治理：
@@ -59,17 +59,18 @@ try {
 if (-not $Root) { $Root = Split-Path -Parent $PSScriptRoot }
 
 # ---------------------------------------------------------------- 预算表（硬编码天花板）
-# 分层预算的天花板值；改此处即为改预算（本脚本是这套口径的唯一出处）。
+# 值取自 README「防膨胀设计」的预算口径；改此处即为改预算，须同时改那边。
 # 这里只收录**每轮注入**的文件：上限来自注入成本，不是「文档该多长」。
 $budgets = [ordered]@{
     'presets\coordinator.patch.yml'            = @{ Lines = 420; Bytes = 32000 }
+    'presets\executor.patch.yml'               = @{ Lines = 130; Bytes = 7500 }
     'skills\project-coordination\BASELINE.md'  = @{ Lines = 300; Bytes = 15000 }
     'skills\project-coordination\DECISIONS.md' = @{ Lines = 300; Bytes = 15000 }
 }
 
-# 不计预算门、只受重复门约束的**按需加载长文档**（依据：决议 C）
-#   C 决议：SKILL.md 行数与字节都不设上限。
-# 仍显示实测行数/字节数，状态列标注 (no budget — by decision)，仍参与重复门。
+# 不计预算门、只受重复门约束的**按需加载长文档**（依据：README「防膨胀设计」）
+#   SKILL.md 行数与字节都不设上限，按「按需查阅文档」处理。
+# 与预算门文件同等对待：仍显示实测行数/字节数，状态列统一标注 (no budget — by decision)，仍参与重复门。
 # 全部相对 Root（组合包目录）解析：内存载体已改为进程内任务板工具，不再有包外的比对源。
 $noBudget = @(
     'skills\project-coordination\SKILL.md'
@@ -215,7 +216,7 @@ foreach ($rel in $budgets.Keys) {
     })
 }
 
-# 不计预算门、但受重复门约束的文件（决议 C）
+# 不计预算门、但受重复门约束的文件（按需查阅文档）
 # 路径先行解析好，重复门（含 -Quiet 分支）与显示共用同一份，避免两处口径漂移。
 $noBudgetFiles = New-Object System.Collections.Generic.List[object]
 foreach ($rel in $noBudget) {
@@ -284,7 +285,7 @@ $sources = New-Object System.Collections.Generic.List[object]
 foreach ($rel in $budgets.Keys) {
     $sources.Add([pscustomobject]@{ Rel = $rel; Full = (Join-Path $Root $rel) })
 }
-# 不计预算门的文件同样进重复门（决议 C）：SKILL.md 也在比对源集合里
+# 不计预算门的文件同样进重复门：SKILL.md 也在比对源集合里
 foreach ($nb in $noBudgetFiles) {
     $sources.Add([pscustomobject]@{ Rel = $nb.Rel; Full = $nb.Full })
 }

@@ -6,7 +6,7 @@
 > `skills/project-coordination/` 下因此是安全的。
 >
 > **唯一权威**：`presets/coordinator.patch.yml` 内联注释里那条不能违反的约束（全仓库唯一副本），
-> 锚点 [`model-selection-coupling`]。本文件只记录"改了什么、为什么"，不复述该约束。
+> 锚点 [`subagent-preset`]。本文件只记录"改了什么、为什么"，不复述该约束。
 
 ## 一、基线与重算
 
@@ -108,7 +108,7 @@ ctx.subagents.registerContinuableSetup is not a function
 
 ## 五、工具面隔离的真实边界（实测确认）
 
-子代理通过 `agentPresets.composeFrom()` 加入父代理**同一个 standing 组合**：
+子代理默认通过 `agentPresets.composeFrom()` 加入父代理**同一个 standing 组合**（0.2.1 起可用 `agentPreset` 指定另一份预设，那时它加入的是那份预设的组合）：
 
 > "a bind, not a mount ... the same plugin objects, the same tool
 > registrations, the same prompt sections."
@@ -119,11 +119,8 @@ ctx.subagents.registerContinuableSetup is not a function
 
 例外只有两类，都已在本预设里用上：
 
-- **人格可以隔离** —— 委派工具行的 `persona` 字段在子代理的 creation window 里装一段
-  scope 内遮蔽人格，子代理因此不再继承协调者的铁律；不给它换人格，最坏结果是静默空转
-  （把任务再转包一层然后回复"已派活"）。
-- **委派工具可以结构隔离** —— `toolFilter.deny: [subagent, subagent_fork]` 对子代理做作用域
-  限制，把两个委派工具从子代理的工具面里真正摘掉（工具仍留在协调者手上）。
+- **人格可以隔离** —— 0.2.1 起不再有 `persona` 字段：改由独立 Agent 预设承担，spawn 行用 `agentPreset: executor` 指过去，子代理因此不再继承协调者的铁律；不给它换人格，最坏结果是静默空转（把任务再转包一层然后回复"已派活"）。
+- **委派工具可以结构隔离** —— 同样落在那个独立预设里：`executor` 的插件列表**根本不含**委派行，子代理手上就没有 `subagent` / `subagent_fork`（工具仍留在协调者手上）。fork 后端拿不到独立预设（`inheritsParentContext`），只能靠 `maxDepth: 1` 限制它继续派活。
 
 其余工具面依旧无法隔离：禁掉 `tool-pwsh`，子代理就再也跑不了构建和测试。因此
 "协调者只委派不执行"**只能由 persona 纪律保证**。
